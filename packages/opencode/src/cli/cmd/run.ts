@@ -299,6 +299,10 @@ export const RunCommand = cmd({
         describe: "auto-approve permissions that are not explicitly denied (dangerous!)",
         default: false,
       })
+      .option("permission-port", {
+        type: "number",
+        describe: "start HTTP server for permission responses (0 = random port)",
+      })
   },
   handler: async (args) => {
     let message = [...args.message, ...(args["--"] || [])]
@@ -406,6 +410,26 @@ export const RunCommand = cmd({
     }
 
     async function execute(sdk: OpencodeClient) {
+      let server: Awaited<ReturnType<typeof Server.listen>> | undefined
+      if (args["permission-port"] !== undefined && !args.attach) {
+        server = await Server.listen({
+          hostname: "127.0.0.1",
+          port: args["permission-port"] || 0,
+        })
+        if (args.format === "json") {
+          process.stdout.write(
+            JSON.stringify({
+              type: "permission_server",
+              timestamp: Date.now(),
+              port: server.port,
+              url: `http://127.0.0.1:${server.port}`,
+            }) + EOL,
+          )
+        } else {
+          UI.println(`Permission server listening on http://127.0.0.1:${server.port}`)
+        }
+      }
+
       function tool(part: ToolPart) {
         try {
           if (part.tool === "bash") return bash(props<typeof BashTool>(part))
@@ -546,6 +570,14 @@ export const RunCommand = cmd({
                 requestID: permission.id,
                 reply: "once",
               })
+            } else if (args.format === "json") {
+              emit("permission_asked", { permission })
+              if (args["permission-port"] === undefined) {
+                await sdk.permission.reply({
+                  requestID: permission.id,
+                  reply: "once",
+                })
+              }
             } else {
               UI.println(
                 UI.Style.TEXT_WARNING_BOLD + "!",
@@ -633,6 +665,7 @@ export const RunCommand = cmd({
 
       loop().catch((e) => {
         console.error(e)
+        if (server) server.stop()
         process.exit(1)
       })
 
@@ -654,6 +687,10 @@ export const RunCommand = cmd({
           variant: args.variant,
           parts: [...files, { type: "text", text: message }],
         })
+      }
+      
+      if (server) {
+        await server.stop()
       }
     }
 
