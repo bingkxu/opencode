@@ -430,6 +430,19 @@ export const RunCommand = cmd({
         }
       }
 
+      let stopping = false
+      async function stopServer() {
+        if (stopping || !server) return
+        stopping = true
+        await server.stop(true)
+      }
+
+      const onSignal = async () => {
+        await stopServer()
+        process.exit(130)
+      }
+      process.on("SIGINT", onSignal)
+
       function tool(part: ToolPart) {
         try {
           if (part.tool === "bash") return bash(props<typeof BashTool>(part))
@@ -659,13 +672,14 @@ export const RunCommand = cmd({
       const sessionID = await session(sdk)
       if (!sessionID) {
         UI.error("Session not found")
+        await stopServer()
         process.exit(1)
       }
       await share(sdk, sessionID)
 
-      loop().catch((e) => {
+      loop().catch(async (e) => {
         console.error(e)
-        if (server) server.stop()
+        await stopServer()
         process.exit(1)
       })
 
@@ -689,9 +703,8 @@ export const RunCommand = cmd({
         })
       }
       
-      if (server) {
-        await server.stop()
-      }
+      process.off("SIGINT", onSignal)
+      await stopServer()
     }
 
     if (args.attach) {
